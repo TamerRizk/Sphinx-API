@@ -1,6 +1,6 @@
 
 //
-// $Id: sphinxapi.js 1082 2013-03-06 07:02:37Z $
+// $Id: sphinxapi.js 1094 2013-03-18 07:02:37Z $
 //
 // Copyright (c) 2013-2020, Tamer Rizk. All rights reserved
 //
@@ -80,12 +80,21 @@ function in_array(a, b, strict){
 	
 	for(var i in b){
 		if(strict){
+			if(!(b[i] in _a))
+				return false
+		}else{
+			if(!(b[i] in _a) && !(b[i] in a))
+				return false			
+		}
+		/*
+		if(strict){
 			if("undefined" == typeof _a[b[i]])
 				return false
 		}else{
 			if("undefined" == typeof _a[b[i]] && "undefined" == typeof a[b[i]])
 				return false			
 		}
+		*/
 	}
 
 	return true;
@@ -119,59 +128,87 @@ function buf_join(bufs){
 
 /// pack 64-bit signed
 function sph_packi64(v){
-	v = parseInt(v, 10);
-	return packlib.pack(">LL", [v>>32, v&0xFFFFFFFF]);
-}
+	v = v+'';
+	var r = parseFloat(v, 10);
+	var s = parseInt(v, 10);
+	if( 0 == r-s)
+		return packlib.pack(">LL", [s < 0 ? -1 : 0, s]);//[v>>32, v&0xFFFFFFFF]);
 
-/// pack 64-bit unsigned
-function sph_packu64(v){
-	assert ( v>=0 );
+	var q = strlen(v) - 13;
+	var p = q > 0 ? q : 0;
+	var lo = Math.abs(parseFloat(v.substr(p)));
+	var hi = Math.abs(parseFloat(v.substr(0, p)));
 
-	if (is_int(v))
-		return packlib.pack(">LL", [v>>32, v&0xFFFFFFFF]);
+	p = lo + hi*1316134912.0; // (10 ^ 13) % (1 << 32) = 1316134912
+	q = Math.floor(p/4294967296.0);
+	var l = p - (q*4294967296.0);
+	var h = hi*2328.0 + q; // (10 ^ 13) / (1 << 32) = 2328
 
-	p = v.length - 13;
-	if(0 > p) 
-		p = 0;
-	
-	lo = parseInt(v.substr(p), 10);
-	hi = parseInt(v.substr(0,p), 10);	
-	m = lo + hi*1316134912;
-	l = m % 4294967296;
-	h = hi*2328 + parseInt(m/4294967296,10);
+	if ( r<0 ){
+		if (l==0){
+			h = 4294967296.0 - h;
+		}else{
+			h = 4294967295.0 - h;
+			l = 4294967296.0 - l;
+		}
+	}
 
 	return packlib.pack(">LL", [h, l]);
 }
 
+/// pack 64-bit unsigned
+function sph_packu64(v){
+	
+	v = v+'';
+	var r = parseFloat(v, 10);
+	var s = parseInt(v, 10);
+
+	if (is_int(r))
+		return packlib.pack(">LL", [0, s]);
+
+	var q = strlen(v) - 13;
+	var p = q > 0 ? q : 0;
+	var lo = parseFloat(v.substr(p));
+	var hi = parseFloat(v.substr(0, p));
+       
+	var m = lo + hi*1316134912.0;
+	q = Math.floor(m / 4294967296.0);
+	var l = m - (q * 4294967296.0);
+	var h = hi*2328.0 + q;
+
+	return packlib.pack(">LL", [h, l]);
+
+}
+
 // unpack 64-bit unsigned
 function sph_unpacku64(v, p){
-	p = p || 0;
+	p = "undefined" == typeof p ? 0 : p;
 	var a = values(packlib.unpack(">L*L*", v, p));
 	var hi = parseInt(a[0],10); 
 	var lo = parseInt(a[1],10);
 	
-	if (0 > hi)
-		hi += (1<<32); 
-	if (0 > lo)
-		lo += (1<<32);
-
-	// x64, int
-	if (2147483647 >= hi)
-		return (hi<<32) + lo;
-
-	
-	C = 100000;
-	h = (parseInt(hi / C, 10) << 32) + parseInt(lo / C, 10);
-	l = ((hi % C) << 32) + (lo % C);
-	if (l>C){
-		h += parseInt(l / C, 10);
-		l  = l % C;
+	if (0 == hi){
+		if (0<lo)
+			return lo;
+		return parseFloat(sprintlib.sprintf("%u", lo), 10);
 	}
 
-	if (0 == h)
-		return l;
+	hi = parseFloat(sprintlib.sprintf("%u", hi), 10);
+	lo = parseFloat(sprintlib.sprintf("%u", lo), 10);
+       
+	var q = Math.floor(hi/10000000.0);
+	var r = hi - q*10000000.0;
+	var m = lo + r*4967296.0;
+	var mq = Math.floor(m/10000000.0);
+	var l = m - mq*10000000.0;
+	var h = q*4294967296.0 + r*429.0 + mq;
 
-	return sprintlib.sprintf("%d%05d", h, l);	
+	h = sprintlib.sprintf("%.0f", h);
+	l = sprintlib.sprintf("%07.0f", l);
+	if ("0"==h)
+		return parseFloat(sprintlib.sprintf("%.0f", l), 10);
+
+	return parseFloat(h+""+l, 10);
 }
 
 // unpack 64-bit signed
@@ -180,15 +217,43 @@ function sph_unpacki64(v, p){
 	var hi = parseInt(a[0], 10);
 	var lo = parseInt(a[1], 10);
 
-	// x64
-	if (0 > hi)
-		hi += (1<<32);
-	if (0 > lo)
-		lo += (1<<32);
+	if (0==hi){
+		if (0<lo)
+			return $lo;
+		return sprintlib.sprintf("%u", lo);
+	}else if (-1==hi){
+		if (0>lo)
+			return lo;
+		return sprintlib.sprintf("%.0f", lo - 4294967296.0);
+	}
+       
+	var neg = "";
+	var c = 0;
+	if (0>hi){
+		hi = ~hi;
+		lo = ~lo;
+		c = 1;
+		neg = "-";
+	}      
 
-	return (hi<<32) + lo;	
+	hi = parseFloat(sprintlib.sprintf("%u", hi), 10);
+	lo = parseFloat(sprintlib.sprintf("%u", lo), 10);
+
+	var q = Math.floor(hi/10000000.0);
+	var r = hi - q*10000000.0;
+	var m = lo + r*4967296.0;
+	var mq = Math.floor(m/10000000.0);
+	var l = m - mq*10000000.0 + c;
+	var h = q*4294967296.0 + r*429.0 + mq;
+
+	h = sprintlib.sprintf("%.0f", h);
+	l = sprintlib.sprintf("%07.0f", l);
+    if ("0"==h)
+		return parseFloat(neg + "" + sprintlib.sprintf("%.0f", parseFloat(l, 10)), 10);
+
+	return parseFloat(neg+""+h+""+l, 10);
+
 }
-
 
 function sph_fixuint(value){
 	if (0 > value) 
@@ -828,17 +893,19 @@ exports.SphinxClient.prototype = {
 		req.push(packlib.pack(">L", [1])); // id64 range marker
 		req.push(sph_packu64(this._min_id), sph_packu64(this._max_id)); // id64 range
 
+
 		// filters
 		req.push(packlib.pack(">L", [count(this._filters)] ));
 		for (var i in this._filters){
+
 			req.push(packlib.pack(">L", [this._filters[i]["attr"].length]), new Buffer(this._filters[i]["attr"], "utf8"));
 			req.push(packlib.pack(">L", [this._filters[i]["type"]]));
-
 			switch (this._filters[i]["type"]){
 				case this.SPH_FILTER_VALUES:
 					req.push(packlib.pack(">L", [count(this._filters[i]["values"])] ));
-					for (var v in this._filters[i]["values"])
+					for (var v in this._filters[i]["values"]){
 						req.push(sph_packi64(this._filters[i]["values"][v]));
+					}
 					break;
 				case this.SPH_FILTER_RANGE:
 					req.push( sph_packi64(this._filters[i]["min"]), sph_packi64(this._filters[i]["max"]) );
@@ -1062,7 +1129,7 @@ system.stdout.writeLine(this._maxmatches+'=>'+values(packlib.unpack('N',packlib.
 					doc = sph_fixuint(doc);
 				}
 				weight = sprintlib.sprintf("%u", weight);
-				if("undefined" == typeof results[ires]["matches"])
+				if(!("matches" in results[ires]))
 					results[ires]["matches"] = [];
 				// create match entry
 				if (this._arrayresult)
@@ -1149,7 +1216,7 @@ system.stdout.writeLine(this._maxmatches+'=>'+values(packlib.unpack('N',packlib.
 				var hits = a[1]; 
 				p += 8;
 
-				if("undefined" == typeof results[ires]["words"])
+				if(!("words" in results[ires]))
 					results[ires]["words"] = {};
 
 				results[ires]["words"][word] = {"docs":sprintlib.sprintf("%u", docs), "hits":sprintlib.sprintf("%u", hits)};
@@ -1184,45 +1251,45 @@ system.stdout.writeLine(this._maxmatches+'=>'+values(packlib.unpack('N',packlib.
 		// fixup options
 		/////////////////
 
-		if ("undefined" == typeof opts["before_match"])
+		if (!("before_match" in opts))
 			opts["before_match"] = "<b>";
-		if ("undefined" == typeof opts["after_match"])
+		if (!("after_match" in opts))
 			opts["after_match"] = "</b>";
-		if ("undefined" == typeof opts["chunk_separator"])
+		if (!("chunk_separator" in opts))
 			opts["chunk_separator"] = " ... ";
-		if ("undefined" == typeof opts["limit"])
+		if (!("limit" in opts))
 			opts["limit"] = 256;
-		if ("undefined" == typeof opts["limit_passages"])
+		if (!("limit_passages" in opts))
 			opts["limit_passages"] = 0;
-		if ("undefined" == typeof opts["limit_words"])
+		if (!("limit_words" in opts))
 			opts["limit_words"] = 0;
-		if ("undefined" == typeof opts["around"])
+		if (!("around" in opts))
 			opts["around"] = 5;
-		if ("undefined" == typeof opts["exact_phrase"])
+		if (!("exact_phrase" in opts))
 			opts["exact_phrase"] = false;
-		if ("undefined" == typeof opts["single_passage"])
+		if (!("single_passage" in opts))
 			opts["single_passage"] = false;
-		if ("undefined" == typeof opts["use_boundaries"])
+		if (!("use_boundaries" in opts))
 			opts["use_boundaries"] = false;
-		if ("undefined" == typeof opts["weight_order"])
+		if (!("weight_order" in opts))
 			opts["weight_order"] = false;
-		if ("undefined" == typeof opts["query_mode"])
+		if (!("query_mode" in opts))
 			opts["query_mode"] = false;
-		if ("undefined" == typeof opts["force_all_words"])
+		if (!("force_all_words" in opts))
 			opts["force_all_words"] = false;
-		if ("undefined" == typeof opts["start_passage_id"])
+		if (!("start_passage_id" in opts))
 			opts["start_passage_id"] = 1;
-		if ("undefined" == typeof opts["load_files"])
+		if (!("load_files" in opts))
 			opts["load_files"] = false;
-		if ("undefined" == typeof opts["html_strip_mode"])
+		if (!("html_strip_mode" in opts))
 			opts["html_strip_mode"] = "index";
-		if ("undefined" == typeof opts["allow_empty"])
+		if (!("allow_empty" in opts))
 			opts["allow_empty"] = false;
-		if ("undefined" == typeof opts["passage_boundary"])
+		if (!("passage_boundary" in opts))
 			opts["passage_boundary"] = "none";
-		if ("undefined" == typeof opts["emit_zones"])
+		if (!("emit_zones" in opts))
 			opts["emit_zones"] = false;
-		if ("undefined" == typeof opts["load_files_scattered"])
+		if (!("load_files_scattered" in opts))
 			opts["load_files_scattered"] = false;
 		
 		/////////////////
