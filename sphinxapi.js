@@ -1,12 +1,12 @@
-
 //
-// $Id: sphinxapi.js 1094 2013-03-18 07:02:37Z $
+// $Id: sphinxapi.js 1096 2013-03-21 00:44:11Z $
 //
 // Copyright (c) 2013-2020, Tamer Rizk. All rights reserved
 //
-// This program is free software; you can redistribute it and/or modify
-// it under the terms of the GNU General Public License. You should have
-// received a copy of the GPL license along with this program; if you
+// This program is free software; you can redistribute it 
+// and/or modify it under the terms of the GNU General 
+// Public License. You should have received a copy of the 
+// GPL license along with this program; if you
 // did not, you can find it at http://www.gnu.org/
 //
 
@@ -108,6 +108,17 @@ function values(a){
 	return _a;
 }
 
+function print_buf(buf){
+	var str = buf.toSource().replace(/(?:^.*\[)|(?:\].*$)/g,'');
+	var a = str.split(', ');
+	for(var i in a){
+		if("0" == a[i])
+			continue;
+		a[i] = String.fromCharCode(a[i]);
+	}
+	return a.join(',');
+}
+
 function buf_len(bufs){
 	var l = 0;
 	for (var i in bufs){
@@ -120,7 +131,7 @@ function buf_join(bufs){
 	var pos = 0;	
 	var buf = new Buffer(Array(buf_len(bufs)+1).join(String.fromCharCode(0)), "utf8");
 	for (var i in bufs){
-		buf.copyFrom(bufs[i], 0, pos, bufs[i].length);
+		buf.copyFrom(bufs[i], 0, pos, pos + bufs[i].length);
 		pos += bufs[i].length;
 	}
 	return buf;
@@ -365,7 +376,7 @@ exports.SphinxClient = (function(){
 		this._groupfunc	= this.SPH_GROUPBY_DAY;				///< group-by function (to pre-process group-by attribute value with)
 		this._ranker		= this.SPH_RANK_PROXIMITY_BM25;	///< ranking mode (default is SPH_RANK_PROXIMITY_BM25)
 		this._rankexpr		= "";		///< ranking mode expression (for SPH_RANK_EXPR)
-		this._maxmatches	= 1000;	///< max matches to retrieve
+		this._maxmatches	= 100000;	///< max matches to retrieve
 		this._cutoff		= 0;		///< cutoff to stop searching at (default is 0)
 		this._retrycount	= 0;		///< distributed retries count
 		this._retrydelay	= 0;		///< distributed retries delay
@@ -882,7 +893,9 @@ exports.SphinxClient.prototype = {
 		req.push(packlib.pack(">L", [this._sort])); // (deprecated) sort mode
 
 		req.push(packlib.pack(">L", [this._sortby.length]), new Buffer(this._sortby, "utf8"));
+
 		req.push(packlib.pack(">L", [query.length]), new Buffer(query, "utf8")); // query itself
+
 		req.push(packlib.pack(">L", [count(this._weights)])); // weights
 
 		for(var i in this._weights)
@@ -922,17 +935,6 @@ exports.SphinxClient.prototype = {
 
 		// group-by clause, max-matches count, group-sort clause, cutoff count
 		req.push(packlib.pack(">LL", [this._groupfunc, this._groupby.length]), new Buffer(this._groupby, "utf8"));
-
-/*
-var file = new (require('fs')).File( 'test.js.txt' );
-file.open('w');
-file.write(String.fromCharCode(0, 0, 3, 232));
-//file.write(packlib.pack( "N", this._maxmatches ));
-//file.write((String.fromCharCode(+parseInt(232,10))).toString('ascii'),0,8);
-//file.flush();
-file.close();
-system.stdout.writeLine(this._maxmatches+'=>'+values(packlib.unpack('N',packlib.pack ( "N", this._maxmatches ))).join('')+"\n===========\n");
-*/
 
 		req.push(packlib.pack(">L", [this._maxmatches]));
 		req.push(packlib.pack(">L", [this._groupsort.length]), new Buffer(this._groupsort, "utf8"));
